@@ -16,7 +16,6 @@ contract FootballClubTrade {
         string abbr;
         uint256 stockPrice;
     }
-
     struct Position {
         uint256 futureId;
         uint256 clubId;
