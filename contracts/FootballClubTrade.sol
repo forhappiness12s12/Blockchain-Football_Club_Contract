@@ -10,9 +10,9 @@ contract FootballClubTrade {
     address public profitAddress;
     uint256 public feePercentage = 100; // Fee percentage(100X) (e.g., 1% = 100)
     uint256 public currentClubId = 0; // Counter for the number of clubs
-    uint256 public lastTimestamp=0;
-    uint256 public currentTimestamp=0;
-    uint256[]  lastOpenInterest = new uint256[](clubs.length);
+    uint256 public lastTimestamp = 0;
+    uint256 public currentTimestamp = 0;
+    uint256[] lastOpenInterest = new uint256[](clubs.length);
 
     struct Club {
         string name;
@@ -71,7 +71,7 @@ contract FootballClubTrade {
             }
         }
 
-        clubs.push(Club(name, abbr, 100_000_000, 0, 0, 0,0,0,0,0));
+        clubs.push(Club(name, abbr, 100_000_000, 0, 0, 0, 0, 0, 0, 0));
     }
 
     function getClub(uint256 clubId) external view returns (Club memory) {
@@ -134,78 +134,91 @@ contract FootballClubTrade {
         require(clubId < clubs.length, "Club is not registered");
         return clubs[clubId].stockPrice;
     }
-   function setVelocity() external {
-    // Initialize arrays for storing current open interest and changes in open interest
-    uint256[] memory currentOpenInterest = new uint256[](clubs.length);
-    int256[] memory changeInOpenInterest = new int256[](clubs.length);
+    function setVelocity() external {
+        // Initialize arrays for storing current open interest and changes in open interest
+        uint256[] memory currentOpenInterest = new uint256[](clubs.length);
+        int256[] memory changeInOpenInterest = new int256[](clubs.length);
 
-    // Populate the currentOpenInterest array
-    for (uint256 i = 0; i < clubs.length; i++) {
-        currentOpenInterest[i] = clubs[i].openinterest;
-    }
-
-    uint256 currentTime = block.timestamp;
-
-    if (lastTimestamp > 0) {
-        uint256 timeElapsed = currentTime - lastTimestamp;
-
+        // Populate the currentOpenInterest array
         for (uint256 i = 0; i < clubs.length; i++) {
-            changeInOpenInterest[i] = int256(currentOpenInterest[i]) - int256(lastOpenInterest[i]);
+            currentOpenInterest[i] = clubs[i].openinterest;
+        }
 
-            if (timeElapsed > 0) { // Ensure there's no division by zero
-                clubs[i].velocity = uint256(changeInOpenInterest[i] / int256(timeElapsed));
-            } else {
-                clubs[i].velocity = 0; // Set velocity to 0 if timeElapsed is 0
+        uint256 currentTime = block.timestamp;
+
+        if (lastTimestamp > 0) {
+            uint256 timeElapsed = currentTime - lastTimestamp;
+
+            for (uint256 i = 0; i < clubs.length; i++) {
+                changeInOpenInterest[i] =
+                    int256(currentOpenInterest[i]) -
+                    int256(lastOpenInterest[i]);
+
+                if (timeElapsed > 0) {
+                    // Ensure there's no division by zero
+                    clubs[i].velocity = uint256(
+                        changeInOpenInterest[i] / int256(timeElapsed)
+                    );
+                } else {
+                    clubs[i].velocity = 0; // Set velocity to 0 if timeElapsed is 0
+                }
             }
         }
+
+        // Update lastOpenInterest and lastTimestamp
+        for (uint256 i = 0; i < clubs.length; i++) {
+            lastOpenInterest[i] = currentOpenInterest[i];
+        }
+        lastTimestamp = currentTime;
     }
 
-    // Update lastOpenInterest and lastTimestamp
-    for (uint256 i = 0; i < clubs.length; i++) {
-        lastOpenInterest[i] = currentOpenInterest[i];
+    function getVelocity(uint256 clubId) external view returns (uint256) {
+        require(clubId < clubs.length, "Invalid club ID");
+        return clubs[clubId].velocity;
     }
-    lastTimestamp = currentTime;
-}
 
 
     function setOpenInterest() external {
-    // Initialize arrays for long and short stocks
-    uint256[] memory totallongstock = new uint256[](clubs.length);
-    uint256[] memory totalshortstock = new uint256[](clubs.length);
+        // Initialize arrays for long and short stocks
+        uint256[] memory totallongstock = new uint256[](clubs.length);
+        uint256[] memory totalshortstock = new uint256[](clubs.length);
 
-    // Iterate through positions and calculate long and short stocks for each club
-    for (uint256 i = 0; i < positions.length; i++) {
-        Position memory position = positions[i];
-        if (position.status == 1) {
-            if (position.positionType == 1) {
-                // Long
-                totallongstock[position.clubId] += position.stockAmount;
-            } else if (position.positionType == 2) {
-                // Short
-                totalshortstock[position.clubId] += position.stockAmount;
+        // Iterate through positions and calculate long and short stocks for each club
+        for (uint256 i = 0; i < positions.length; i++) {
+            Position memory position = positions[i];
+            if (position.status == 1) {
+                if (position.positionType == 1) {
+                    // Long
+                    totallongstock[position.clubId] += position.stockAmount;
+                } else if (position.positionType == 2) {
+                    // Short
+                    totalshortstock[position.clubId] += position.stockAmount;
+                }
+            }
+        }
+
+        // Calculate open interest, long percentage, and short percentage for each club
+        for (uint256 j = 0; j < clubs.length; j++) {
+            uint256 totalOpenInterest = totallongstock[j] + totalshortstock[j];
+            clubs[j].openinterest = totalOpenInterest;
+            clubs[j].availlong = totallongstock[j];
+            clubs[j].availshort = totalshortstock[j];
+
+            if (totalOpenInterest > 0) {
+                clubs[j].longpercent =
+                    (totallongstock[j] * 100) /
+                    totalOpenInterest;
+                clubs[j].shortpercent =
+                    (totalshortstock[j] * 100) /
+                    totalOpenInterest;
+                clubs[j].funding = totallongstock[j] - totalshortstock[j];
+            } else {
+                clubs[j].longpercent = 0;
+                clubs[j].shortpercent = 0;
+                clubs[j].funding = 0; // Initialize funding to 0 when there is no open interest
             }
         }
     }
-
-    // Calculate open interest, long percentage, and short percentage for each club
-    for (uint256 j = 0; j < clubs.length; j++) {
-        uint256 totalOpenInterest = totallongstock[j] + totalshortstock[j];
-        clubs[j].openinterest = totalOpenInterest;
-        clubs[j].availlong = totallongstock[j];
-        clubs[j].availshort = totalshortstock[j];
-
-        if (totalOpenInterest > 0) {
-            clubs[j].longpercent = (totallongstock[j] * 100) / totalOpenInterest;
-            clubs[j].shortpercent = (totalshortstock[j] * 100) / totalOpenInterest;
-            clubs[j].funding = totallongstock[j] - totalshortstock[j];
-        } else {
-            clubs[j].longpercent = 0;
-            clubs[j].shortpercent = 0;
-            clubs[j].funding = 0; // Initialize funding to 0 when there is no open interest
-        }
-    }
-}
-
 
     function getOpenInterest(
         uint256 clubId
@@ -226,11 +239,10 @@ contract FootballClubTrade {
         openInterest = clubs[clubId].openinterest;
         longPercent = clubs[clubId].longpercent;
         shortPercent = clubs[clubId].shortpercent;
-        availlong=clubs[clubId].availlong;
-        availshort=clubs[clubId].availshort;
+        availlong = clubs[clubId].availlong;
+        availshort = clubs[clubId].availshort;
 
-
-        return (openInterest, longPercent, shortPercent,availlong,availshort);
+        return (openInterest, longPercent, shortPercent, availlong, availshort);
     }
 
     function getAllowance() external view returns (uint256) {
