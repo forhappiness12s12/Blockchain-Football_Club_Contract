@@ -7,7 +7,7 @@ const { API_URL, ADMIN_PRIVATE_KEY, USER_PRIVATE_KEY, PROFIT_PRIVATE_KEY } = pro
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
   solidity: "0.8.24",
-  defaultNetwork: "plume_testnet",
+  defaultNetwork: "hardhat",
   networks: {
     hardhat: {},
     plume_testnet: {

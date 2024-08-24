@@ -10,16 +10,26 @@ contract FootballClubTrade {
     address public profitAddress;
     uint256 public feePercentage = 100; // Fee percentage(100X) (e.g., 1% = 100)
     uint256 public currentClubId = 0; // Counter for the number of clubs
+    uint256 public lastTimestamp=0;
+    uint256 public currentTimestamp=0;
+    uint256[]  lastOpenInterest = new uint256[](clubs.length);
 
     struct Club {
         string name;
         string abbr;
         uint256 stockPrice;
+        uint256 openinterest;
+        uint256 longpercent;
+        uint256 shortpercent;
+        uint256 availlong;
+        uint256 availshort;
+        uint256 funding;
+        uint256 velocity;
     }
     struct Position {
         uint256 futureId;
         uint256 clubId;
-        uint256 positionType;   //1 - long, 2- short
+        uint256 positionType; //1 - long, 2- short
         uint256 stockAmount;
         uint256 stockPrice;
         uint256 status; //1 - open, 2 - closed, 3 - processed
@@ -35,9 +45,9 @@ contract FootballClubTrade {
     Position[] positions;
     address[] positionOwners;
 
-    modifier onlyOwner {
-      require(msg.sender == ownerAddress);
-      _;
+    modifier onlyOwner() {
+        require(msg.sender == ownerAddress);
+        _;
     }
 
     constructor(
@@ -50,42 +60,33 @@ contract FootballClubTrade {
         profitAddress = _profitAddress;
     }
 
-    function registerClub(
-        string memory name,
-        string memory abbr
-    ) external {
+    function registerClub(string memory name, string memory abbr) external {
         require(bytes(name).length > 0, "Club name is required");
-        require(
-            bytes(abbr).length > 0,
-            "Club abbr is required"
-        );
+        require(bytes(abbr).length > 0, "Club abbr is required");
 
-        for(uint256 i = 0 ; i < clubs.length; i++) {
+        for (uint256 i = 0; i < clubs.length; i++) {
             // Club memory club = clubs[i];
-            if(keccak256(bytes(clubs[i].abbr)) == keccak256(bytes(abbr))) {
+            if (keccak256(bytes(clubs[i].abbr)) == keccak256(bytes(abbr))) {
                 revert("Club already registered");
             }
         }
 
-        clubs.push(Club(name, abbr, 100_000_000));
+        clubs.push(Club(name, abbr, 100_000_000, 0, 0, 0,0,0,0,0));
     }
 
-    function getClub(
-        uint256 clubId
-    ) external view returns (Club memory) {
+    function getClub(uint256 clubId) external view returns (Club memory) {
         require(clubId < clubs.length, "Invalid club ID");
 
         return clubs[clubId];
     }
 
-    function getClubIndex(
-    ) external view returns (uint256) {
+    function getClubIndex() external view returns (uint256) {
         return clubs.length;
     }
 
     function getAllClubs() external view returns (Club[] memory) {
         Club[] memory result = new Club[](clubs.length);
-        for(uint256 i = 0 ; i < clubs.length ; i++) {
+        for (uint256 i = 0; i < clubs.length; i++) {
             result[i] = clubs[i];
         }
 
@@ -133,19 +134,117 @@ contract FootballClubTrade {
         require(clubId < clubs.length, "Club is not registered");
         return clubs[clubId].stockPrice;
     }
+   function setVelocity() external {
+    // Initialize arrays for storing current open interest and changes in open interest
+    uint256[] memory currentOpenInterest = new uint256[](clubs.length);
+    int256[] memory changeInOpenInterest = new int256[](clubs.length);
+
+    // Populate the currentOpenInterest array
+    for (uint256 i = 0; i < clubs.length; i++) {
+        currentOpenInterest[i] = clubs[i].openinterest;
+    }
+
+    uint256 currentTime = block.timestamp;
+
+    if (lastTimestamp > 0) {
+        uint256 timeElapsed = currentTime - lastTimestamp;
+
+        for (uint256 i = 0; i < clubs.length; i++) {
+            changeInOpenInterest[i] = int256(currentOpenInterest[i]) - int256(lastOpenInterest[i]);
+
+            if (timeElapsed > 0) { // Ensure there's no division by zero
+                clubs[i].velocity = uint256(changeInOpenInterest[i] / int256(timeElapsed));
+            } else {
+                clubs[i].velocity = 0; // Set velocity to 0 if timeElapsed is 0
+            }
+        }
+    }
+
+    // Update lastOpenInterest and lastTimestamp
+    for (uint256 i = 0; i < clubs.length; i++) {
+        lastOpenInterest[i] = currentOpenInterest[i];
+    }
+    lastTimestamp = currentTime;
+}
+
+
+    function setOpenInterest() external {
+    // Initialize arrays for long and short stocks
+    uint256[] memory totallongstock = new uint256[](clubs.length);
+    uint256[] memory totalshortstock = new uint256[](clubs.length);
+
+    // Iterate through positions and calculate long and short stocks for each club
+    for (uint256 i = 0; i < positions.length; i++) {
+        Position memory position = positions[i];
+        if (position.status == 1) {
+            if (position.positionType == 1) {
+                // Long
+                totallongstock[position.clubId] += position.stockAmount;
+            } else if (position.positionType == 2) {
+                // Short
+                totalshortstock[position.clubId] += position.stockAmount;
+            }
+        }
+    }
+
+    // Calculate open interest, long percentage, and short percentage for each club
+    for (uint256 j = 0; j < clubs.length; j++) {
+        uint256 totalOpenInterest = totallongstock[j] + totalshortstock[j];
+        clubs[j].openinterest = totalOpenInterest;
+        clubs[j].availlong = totallongstock[j];
+        clubs[j].availshort = totalshortstock[j];
+
+        if (totalOpenInterest > 0) {
+            clubs[j].longpercent = (totallongstock[j] * 100) / totalOpenInterest;
+            clubs[j].shortpercent = (totalshortstock[j] * 100) / totalOpenInterest;
+            clubs[j].funding = totallongstock[j] - totalshortstock[j];
+        } else {
+            clubs[j].longpercent = 0;
+            clubs[j].shortpercent = 0;
+            clubs[j].funding = 0; // Initialize funding to 0 when there is no open interest
+        }
+    }
+}
+
+
+    function getOpenInterest(
+        uint256 clubId
+    )
+        external
+        view
+        returns (
+            uint256 openInterest,
+            uint256 longPercent,
+            uint256 shortPercent,
+            uint256 availlong,
+            uint256 availshort
+        )
+    {
+        require(clubId < clubs.length, "Club is not registered");
+
+        // Retrieve the open interest, long percent, and short percent for the specified club
+        openInterest = clubs[clubId].openinterest;
+        longPercent = clubs[clubId].longpercent;
+        shortPercent = clubs[clubId].shortpercent;
+        availlong=clubs[clubId].availlong;
+        availshort=clubs[clubId].availshort;
+
+
+        return (openInterest, longPercent, shortPercent,availlong,availshort);
+    }
 
     function getAllowance() external view returns (uint256) {
         uint256 currentAllowance = token.allowance(msg.sender, address(this));
         return currentAllowance;
     }
 
-    function openPosition (
+    function openPosition(
         uint256 clubId,
         uint256 stockAmount,
         uint256 longShort,
         uint256 value,
         uint256 _futureIndex
-    ) external payable{
+    ) external payable {
         require(clubId < clubs.length, "Club is not registered");
         require(_futureIndex < futureIndex, "Invalid future index");
 
@@ -164,7 +263,9 @@ contract FootballClubTrade {
                 "Insufficient user stock balance"
             );
 
-            userStock[msg.sender][clubId] = userStock[msg.sender][clubId] - stockAmount;
+            userStock[msg.sender][clubId] =
+                userStock[msg.sender][clubId] -
+                stockAmount;
         } else if (longShort == 1) {
             // Long position
             uint256 tokenAmount = stockAmount * value;
@@ -181,12 +282,25 @@ contract FootballClubTrade {
             revert("Invalid longShort value");
         }
 
-        positions.push(Position(_futureIndex, clubId, longShort, stockAmount, value, 1, msg.sender));
+        positions.push(
+            Position(
+                _futureIndex,
+                clubId,
+                longShort,
+                stockAmount,
+                value,
+                1,
+                msg.sender
+            )
+        );
     }
 
     function closePosition(uint256 positionId) external {
         require(positionId < positions.length, "Position not exist");
-        require(msg.sender == positions[positionId].userAddress, "No privilege to close this position");
+        require(
+            msg.sender == positions[positionId].userAddress,
+            "No privilege to close this position"
+        );
         closePositionInternal(positionId);
     }
 
@@ -196,13 +310,17 @@ contract FootballClubTrade {
         address userAddress = position.userAddress;
 
         if (position.positionType == 1) {
-            uint256 tokenAmount = position.stockPrice * position.stockAmount * (10000 - feePercentage) / 10000;
+            uint256 tokenAmount = (position.stockPrice *
+                position.stockAmount *
+                (10000 - feePercentage)) / 10000;
             require(
                 token.transfer(userAddress, tokenAmount),
                 "Token transfer failed"
             );
         } else if (position.positionType == 2) {
-            userStock[userAddress][position.clubId] = userStock[userAddress][position.clubId] + position.stockAmount;
+            userStock[userAddress][position.clubId] =
+                userStock[userAddress][position.clubId] +
+                position.stockAmount;
         } else {
             revert("Invalid longShort value");
         }
@@ -213,13 +331,7 @@ contract FootballClubTrade {
 
     function getOpenPosition(
         uint256 positionId
-    )
-        external
-        view
-        returns (
-            Position memory
-        )
-    {
+    ) external view returns (Position memory) {
         require(positionId < positions.length, "Position does not exist");
 
         Position memory position = positions[positionId];
@@ -228,31 +340,38 @@ contract FootballClubTrade {
     }
 
     function executeFuture(uint256 _futureIndex) external {
-        for(uint256 i = 0 ; i < positions.length; i++) {
+        for (uint256 i = 0; i < positions.length; i++) {
             Position memory position = positions[i];
-            if(position.futureId != _futureIndex || position.status != 1) continue;
+            if (position.futureId != _futureIndex || position.status != 1)
+                continue;
 
             uint256 clubId = position.clubId;
             uint256 currentPrice = clubs[clubId].stockPrice;
-            if(position.positionType == 1) {
+            if (position.positionType == 1) {
                 //Long
-                if(currentPrice <= position.stockPrice) {
+                if (currentPrice <= position.stockPrice) {
                     //process position
                     position.status = 3;
                     positions[i] = position;
-                    userStock[position.userAddress][clubId] = userStock[position.userAddress][clubId] + position.stockAmount;
+                    userStock[position.userAddress][clubId] =
+                        userStock[position.userAddress][clubId] +
+                        position.stockAmount;
                 } else {
                     //close position
                     closePositionInternal(i);
                 }
             } else {
                 //Short
-                if(currentPrice >= position.stockPrice) {
+                if (currentPrice >= position.stockPrice) {
                     //process position
                     position.status = 3;
                     positions[i] = position;
-                    userStock[position.userAddress][clubId] = userStock[position.userAddress][clubId] - position.stockAmount;
-                    uint256 tokenAmount = position.stockPrice * position.stockAmount * (10000 - feePercentage) / 10000;
+                    userStock[position.userAddress][clubId] =
+                        userStock[position.userAddress][clubId] -
+                        position.stockAmount;
+                    uint256 tokenAmount = (position.stockPrice *
+                        position.stockAmount *
+                        (10000 - feePercentage)) / 10000;
                     token.transfer(position.userAddress, tokenAmount);
                 } else {
                     //close position
@@ -262,24 +381,26 @@ contract FootballClubTrade {
         }
     }
 
-    function getUserOpenPositions(address userAddress) external view returns (Position[] memory){
+    function getUserOpenPositions(
+        address userAddress
+    ) external view returns (Position[] memory) {
         uint256 positionSize = 0;
-        for(uint256 i = 0 ; i < positions.length; i++) {
+        for (uint256 i = 0; i < positions.length; i++) {
             Position memory position = positions[i];
-            if(position.status == 1 && position.userAddress == userAddress) {
+            if (position.status == 1 && position.userAddress == userAddress) {
                 positionSize++; //result.push(position);
             }
         }
 
-        if(positionSize == 0) {
+        if (positionSize == 0) {
             return new Position[](0);
         }
 
         Position[] memory result = new Position[](positionSize);
         positionSize = 0;
-        for(uint256 i = 0 ; i < positions.length; i++) {
+        for (uint256 i = 0; i < positions.length; i++) {
             Position memory position = positions[i];
-            if(position.status == 1 && position.userAddress == userAddress) {
+            if (position.status == 1 && position.userAddress == userAddress) {
                 result[positionSize] = position;
                 positionSize++;
             }
@@ -287,9 +408,11 @@ contract FootballClubTrade {
         return result;
     }
 
-    function getUserStock(address userAddress) external view returns(uint256[] memory) {
+    function getUserStock(
+        address userAddress
+    ) external view returns (uint256[] memory) {
         uint256[] memory userStocks = new uint256[](clubs.length);
-        for(uint256 i = 0 ; i < clubs.length ; i++) {
+        for (uint256 i = 0; i < clubs.length; i++) {
             userStocks[i] = userStock[userAddress][i];
         }
         return userStocks;
@@ -305,8 +428,8 @@ contract FootballClubTrade {
 
     function withdraw(uint256 amount, address target) external onlyOwner {
         require(
-                token.balanceOf(address(this)) >= amount,
-                "Insufficient token balance"
+            token.balanceOf(address(this)) >= amount,
+            "Insufficient token balance"
         );
         token.transfer(target, amount);
     }
