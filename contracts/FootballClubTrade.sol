@@ -40,6 +40,13 @@ contract FootballClubTrade {
     uint256 public futureIndex; // Keeps track of the next order index
 
     mapping(address => mapping(uint256 => uint256)) userStock; // Maps club number to user address to stock amount
+    // Define a struct to keep track of historical data
+    struct HistoricalStockData {
+        uint256[] prices;
+    }
+
+    // Define mappings
+    mapping(uint256 => HistoricalStockData) private historicalstockprice;
 
     Club[] clubs;
     Position[] positions;
@@ -125,9 +132,26 @@ contract FootballClubTrade {
 
     function setClubStockPrice(uint256 clubId, uint256 newStockPrice) external {
         require(clubId < clubs.length, "Club is not registered");
-        Club memory club = clubs[clubId];
+        Club storage club = clubs[clubId];
+
+        addHistoricalPrice(clubId, club.stockPrice);
         club.stockPrice = newStockPrice;
         clubs[clubId] = club;
+    }
+    function addHistoricalPrice(uint256 clubId, uint256 price) public {
+        require(clubId < clubs.length, "Club is not registered");
+
+        HistoricalStockData storage data = historicalstockprice[clubId];
+        data.prices.push(price);
+    }
+
+    function getHistoricalClubStockPrices(
+        uint256 clubId
+    ) external view returns (uint256[] memory) {
+        require(clubId < clubs.length, "Club is not registered");
+
+        HistoricalStockData storage data = historicalstockprice[clubId];
+        return data.prices;
     }
 
     function getClubStockPrice(uint256 clubId) external view returns (uint256) {
@@ -176,7 +200,6 @@ contract FootballClubTrade {
         require(clubId < clubs.length, "Invalid club ID");
         return clubs[clubId].velocity;
     }
-
 
     function setOpenInterest() external {
         // Initialize arrays for long and short stocks
